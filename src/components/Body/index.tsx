@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect } from 'react';
 import {
   Container,
   InputGroup,
@@ -44,7 +44,7 @@ import {
   GridItem,
   Image,
   Spinner,
-} from "@chakra-ui/react";
+} from '@chakra-ui/react';
 import {
   SettingsIcon,
   InfoIcon,
@@ -53,15 +53,17 @@ import {
   CopyIcon,
   DeleteIcon,
   CloseIcon,
-} from "@chakra-ui/icons";
-import { Select as RSelect, SingleValue } from "chakra-react-select";
-import WalletConnect from "@walletconnect/client";
-import { IClientMeta } from "@walletconnect/types";
-import { ethers } from "ethers";
-import axios from "axios";
-import networksList from "evm-rpcs-list";
-import { useSafeInject } from "../../contexts/SafeInjectContext";
-import Tab from "./Tab";
+} from '@chakra-ui/icons';
+
+import { Select as RSelect, SingleValue } from 'chakra-react-select';
+import { ethers } from 'ethers';
+import axios from 'axios';
+import networksList from 'evm-rpcs-list';
+import { useSafeInject } from '../../contexts/SafeInjectContext';
+import Tab from './Tab';
+import { Web3Wallet as Web3WalletType } from '@walletconnect/web3wallet/dist/types/client';
+import SignClient from '@walletconnect/sign-client';
+import { SessionTypes } from '@walletconnect/types';
 
 interface SafeDappInfo {
   id: number;
@@ -74,6 +76,8 @@ interface SelectedNetworkOption {
   label: string;
   value: number;
 }
+
+const WCUrlV2 = 'wss://relay.walletconnect.com';
 
 const primaryNetworkIds = [
   1, // ETH Mainnet
@@ -99,15 +103,10 @@ const secondaryNetworkOptions = Object.entries(networksList)
       rpcs: arr[1].rpcs,
     };
   });
-const allNetworksOptions = [
-  ...primaryNetworkOptions,
-  ...secondaryNetworkOptions,
-];
+const allNetworksOptions = [...primaryNetworkOptions, ...secondaryNetworkOptions];
 
 const slicedText = (txt: string) => {
-  return txt.length > 6
-    ? `${txt.slice(0, 4)}...${txt.slice(txt.length - 2, txt.length)}`
-    : txt;
+  return txt.length > 6 ? `${txt.slice(0, 4)}...${txt.slice(txt.length - 2, txt.length)}` : txt;
 };
 
 const CopyToClipboard = ({ txt }: { txt: string }) => (
@@ -115,7 +114,7 @@ const CopyToClipboard = ({ txt }: { txt: string }) => (
     onClick={() => {
       navigator.clipboard.writeText(txt);
     }}
-    size="sm"
+    size='sm'
   >
     <CopyIcon />
   </Button>
@@ -124,7 +123,7 @@ const CopyToClipboard = ({ txt }: { txt: string }) => (
 const TD = ({ txt }: { txt: string }) => (
   <Td>
     <HStack>
-      <Tooltip label={txt} hasArrow placement="top">
+      <Tooltip label={txt} hasArrow placement='top'>
         <Text>{slicedText(txt)}</Text>
       </Tooltip>
       <CopyToClipboard txt={txt} />
@@ -134,20 +133,14 @@ const TD = ({ txt }: { txt: string }) => (
 
 function Body() {
   const { colorMode } = useColorMode();
-  const bgColor = { light: "white", dark: "gray.700" };
-  const addressFromURL = new URLSearchParams(window.location.search).get(
-    "address"
-  );
-  const urlFromURL = new URLSearchParams(window.location.search).get("url");
-  const chainFromURL = new URLSearchParams(window.location.search).get("chain");
+  const bgColor = { light: 'white', dark: 'gray.700' };
+  const addressFromURL = new URLSearchParams(window.location.search).get('address');
+  const urlFromURL = new URLSearchParams(window.location.search).get('url');
+  const chainFromURL = new URLSearchParams(window.location.search).get('chain');
   let networkIdViaURL = 1;
   if (chainFromURL) {
     for (let i = 0; i < allNetworksOptions.length; i++) {
-      if (
-        allNetworksOptions[i].name
-          .toLowerCase()
-          .includes(chainFromURL.toLowerCase())
-      ) {
+      if (allNetworksOptions[i].name.toLowerCase().includes(chainFromURL.toLowerCase())) {
         networkIdViaURL = allNetworksOptions[i].chainId;
         break;
       }
@@ -156,39 +149,27 @@ function Body() {
   const toast = useToast();
   const { onOpen, onClose, isOpen } = useDisclosure();
   const { isOpen: tableIsOpen, onToggle: tableOnToggle } = useDisclosure();
-  const {
-    isOpen: isSafeAppsOpen,
-    onOpen: openSafeAapps,
-    onClose: closeSafeApps,
-  } = useDisclosure();
+  const { isOpen: isSafeAppsOpen, onOpen: openSafeAapps, onClose: closeSafeApps } = useDisclosure();
 
-  const {
-    setAddress: setIFrameAddress,
-    appUrl,
-    setAppUrl,
-    setRpcUrl,
-    iframeRef,
-    latestTransaction,
-  } = useSafeInject();
+  const { setAddress: setIFrameAddress, appUrl, setAppUrl, setRpcUrl, iframeRef, latestTransaction } = useSafeInject();
 
   const [provider, setProvider] = useState<ethers.providers.JsonRpcProvider>();
-  const [showAddress, setShowAddress] = useState(addressFromURL ?? ""); // gets displayed in input. ENS name remains as it is
-  const [address, setAddress] = useState(addressFromURL ?? ""); // internal resolved address
+  const [showAddress, setShowAddress] = useState(addressFromURL ?? ''); // gets displayed in input. ENS name remains as it is
+  const [address, setAddress] = useState(addressFromURL ?? ''); // internal resolved address
   const [isAddressValid, setIsAddressValid] = useState(true);
-  const [uri, setUri] = useState("");
+  const [uri, setUri] = useState('');
   const [networkId, setNetworkId] = useState(networkIdViaURL);
-  const [selectedNetworkOption, setSelectedNetworkOption] = useState<
-    SingleValue<SelectedNetworkOption>
-  >({
+  const [selectedNetworkOption, setSelectedNetworkOption] = useState<SingleValue<SelectedNetworkOption>>({
     label: networksList[networkIdViaURL].name,
     value: networkIdViaURL,
   });
-  const [connector, setConnector] = useState<WalletConnect>();
-  const [peerMeta, setPeerMeta] = useState<IClientMeta>();
+  // const [connector, setConnector] = useState<WalletConnect>();
+  const [wcV2wallet, setWcV2wallet] = useState<Web3WalletType>();
+  // const [peerMeta, setPeerMeta] = useState<IClientMeta>();
   const [isConnected, setIsConnected] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const tabs = ["WalletConnect", "iFrame", "Extension"];
+  const tabs = ['WalletConnect V2', 'iFrame', 'Extension'];
   const [selectedTabIndex, setSelectedTabIndex] = useState(urlFromURL ? 1 : 0);
   const [isIFrameLoading, setIsIFrameLoading] = useState(false);
   const [safeDapps, setSafeDapps] = useState<{
@@ -196,12 +177,10 @@ function Body() {
   }>({});
   const [searchSafeDapp, setSearchSafeDapp] = useState<string>();
   const [filteredSafeDapps, setFilteredSafeDapps] = useState<SafeDappInfo[]>();
-  const [inputAppUrl, setInputAppUrl] = useState<string | undefined>(
-    urlFromURL ?? undefined
-  );
+  const [inputAppUrl, setInputAppUrl] = useState<string | undefined>(urlFromURL ?? undefined);
   const [iframeKey, setIframeKey] = useState(0); // hacky way to reload iframe when key changes
 
-  const [tenderlyForkId, setTenderlyForkId] = useState("");
+  const [tenderlyForkId, setTenderlyForkId] = useState('');
   const [sendTxnData, setSendTxnData] = useState<
     {
       id: number;
@@ -215,36 +194,32 @@ function Body() {
   useEffect(() => {
     const { session, _showAddress } = getCachedSession();
     if (session) {
-      let _connector = new WalletConnect({ session });
-
-      if (_connector.peerMeta) {
-        try {
-          setConnector(_connector);
-          setShowAddress(_showAddress ? _showAddress : _connector.accounts[0]);
-          setAddress(_connector.accounts[0]);
-          setUri(_connector.uri);
-          setPeerMeta(_connector.peerMeta);
-          setIsConnected(true);
-          const chainId =
-            (_connector.chainId as unknown as { chainID: number }).chainID ||
-            _connector.chainId;
-
-          setNetworkId(chainId);
-        } catch {
-          console.log("Corrupt old session. Starting fresh");
-          localStorage.removeItem("walletconnect");
-        }
-      }
+      // let _connector = new WalletConnect({ session });
+      // if (_connector.peerMeta) {
+      //   try {
+      //     // setConnector(_connector);
+      //     setShowAddress(_showAddress ? _showAddress : _connector.accounts[0]);
+      //     setAddress(_connector.accounts[0]);
+      //     setUri(_connector.uri);
+      //     setPeerMeta(_connector.peerMeta);
+      //     setIsConnected(true);
+      //     const chainId = (_connector.chainId as unknown as { chainID: number }).chainID || _connector.chainId;
+      //     setNetworkId(chainId);
+      //   } catch {
+      //     console.log('Corrupt old session. Starting fresh');
+      //     localStorage.removeItem('walletconnect');
+      //   }
+      // }
     }
 
     setProvider(
       new ethers.providers.JsonRpcProvider(
-        `https://mainnet.infura.io/v3/${process.env.REACT_APP_INFURA_KEY}`
+        process.env.REACT_APP_PROVIDER_URL || `https://mainnet.infura.io/v3/${process.env.REACT_APP_INFURA_KEY}`
       )
     );
 
-    const storedTenderlyForkId = localStorage.getItem("tenderlyForkId");
-    setTenderlyForkId(storedTenderlyForkId ? storedTenderlyForkId : "");
+    const storedTenderlyForkId = localStorage.getItem('tenderlyForkId');
+    setTenderlyForkId(storedTenderlyForkId ? storedTenderlyForkId : '');
   }, []);
 
   useEffect(() => {
@@ -257,19 +232,19 @@ function Body() {
     }
   }, [provider]);
 
-  useEffect(() => {
-    if (connector) {
-      subscribeToEvents();
-    }
-    // eslint-disable-next-line
-  }, [connector]);
+  // useEffect(() => {
+  //   if (connector) {
+  //     subscribeToEvents();
+  //   }
+  //   // eslint-disable-next-line
+  // }, [connector]);
 
   useEffect(() => {
-    localStorage.setItem("tenderlyForkId", tenderlyForkId);
+    localStorage.setItem('tenderlyForkId', tenderlyForkId);
   }, [tenderlyForkId]);
 
   useEffect(() => {
-    localStorage.setItem("showAddress", showAddress);
+    localStorage.setItem('showAddress', showAddress);
   }, [showAddress]);
 
   useEffect(() => {
@@ -292,19 +267,16 @@ function Body() {
         if (data.some((d) => d.id === newTxn.id)) {
           return data;
         } else {
-          return [
-            { ...newTxn, value: parseInt(newTxn.value, 16).toString() },
-            ...data,
-          ];
+          return [{ ...newTxn, value: parseInt(newTxn.value, 16).toString() }, ...data];
         }
       });
 
       if (tenderlyForkId.length > 0) {
         axios
-          .post("https://rpc.tenderly.co/fork/" + tenderlyForkId, {
-            jsonrpc: "2.0",
+          .post('https://rpc.tenderly.co/fork/' + tenderlyForkId, {
+            jsonrpc: '2.0',
             id: newTxn.id,
-            method: "eth_sendTransaction",
+            method: 'eth_sendTransaction',
             params: [
               {
                 from: newTxn.from,
@@ -342,12 +314,8 @@ function Body() {
           if (!searchSafeDapp) return true;
 
           return (
-            dapp.name
-              .toLowerCase()
-              .indexOf(searchSafeDapp.toLocaleLowerCase()) !== -1 ||
-            dapp.url
-              .toLowerCase()
-              .indexOf(searchSafeDapp.toLocaleLowerCase()) !== -1
+            dapp.name.toLowerCase().indexOf(searchSafeDapp.toLocaleLowerCase()) !== -1 ||
+            dapp.url.toLowerCase().indexOf(searchSafeDapp.toLocaleLowerCase()) !== -1
           );
         })
       );
@@ -359,6 +327,7 @@ function Body() {
   const resolveAndValidateAddress = async () => {
     let isValid;
     let _address = address;
+    console.info('resolveAndValidateAddress -> address:', address);
     if (!address) {
       isValid = false;
     } else {
@@ -378,9 +347,9 @@ function Body() {
     setIsAddressValid(isValid);
     if (!isValid) {
       toast({
-        title: "Invalid Address",
-        description: "Address is not an ENS or Ethereum address",
-        status: "error",
+        title: 'Invalid Address',
+        description: 'Address is not an ENS or Ethereum address',
+        status: 'error',
         isClosable: true,
         duration: 4000,
       });
@@ -390,10 +359,8 @@ function Body() {
   };
 
   const getCachedSession = () => {
-    const local = localStorage ? localStorage.getItem("walletconnect") : null;
-    const _showAddress = localStorage
-      ? localStorage.getItem("showAddress")
-      : null;
+    const local = localStorage ? localStorage.getItem('walletconnect') : null;
+    const _showAddress = localStorage ? localStorage.getItem('showAddress') : null;
 
     let session = null;
     if (local) {
@@ -412,20 +379,73 @@ function Body() {
 
     if (isValid) {
       try {
-        let _connector = new WalletConnect({ uri });
+        const signClient = await SignClient.init({
+          logger: 'debug',
+          projectId: '71a01028e78b592975e2c692d2061b35', //process.env.NEXT_PUBLIC_PROJECT_ID,
+          relayUrl: WCUrlV2,
+          metadata: {
+            name: 'React Wallet',
+            description: 'Impersonator for WalletConnect',
+            url: 'https://impersonator.dev.copristo.com/',
+            icons: ['https://avatars.githubusercontent.com/u/37784886'],
+          },
+        });
+        // const wcV2wallet = await Web3Wallet.init({
+        //   core, // <- pass the shared `core` instance
+        //   metadata: {
+        //     name: 'Demo app',
+        //     description: 'Demo Client as Wallet/Peer',
+        //     url: 'impersonator.xyz',
+        //     icons: [],
+        //   },
+        // });
+        // let _connector = new WalletConnect({ uri });
+        signClient.on('session_request', approveSession);
+        // TODOs
+        signClient.on('session_ping', (data) => console.log('ping', data));
+        signClient.on('session_event', (data) => console.log('event', data));
+        signClient.on('session_update', (data) => console.log('update', data));
+        signClient.on('session_delete', (data) => console.log('delete', data));
+        signClient.on('session_proposal', async (proposal) => {
+          if (proposal) {
+            const namespaces: SessionTypes.Namespaces = {};
+            const requiredNamespaces = proposal.params.requiredNamespaces;
+            Object.keys(requiredNamespaces).forEach((key) => {
+              const accounts: string[] = [];
+              requiredNamespaces[key].chains?.map((chain) => {
+                accounts.push(`${chain}:${address}`);
+              });
+              namespaces[key] = {
+                accounts,
+                chains: key.includes(':') ? [key] : requiredNamespaces[key].chains,
+                methods: requiredNamespaces[key].methods,
+                events: requiredNamespaces[key].events,
+              };
+            });
+            const { acknowledged } = await signClient.approve({
+              id: proposal.id,
+              relayProtocol: proposal.params.relays[0].protocol,
+              namespaces,
+            });
+            await acknowledged();
+            setWcV2wallet(wcV2wallet);
+            setLoading(false);
+          }
+        });
+        await signClient.core.pairing.pair({ uri });
 
-        if (!_connector.connected) {
-          await _connector.createSession();
-        }
+        // if (!_connector.connected) {
+        //   await _connector.createSession();
+        // }
 
-        setConnector(_connector);
-        setUri(_connector.uri);
+        // setConnector(_connector);
+        // setUri(_connector.uri);
       } catch (err) {
         console.error(err);
         toast({
           title: "Couldn't Connect",
-          description: "Refresh dApp and Connect again",
-          status: "error",
+          description: 'Refresh dApp and Connect again',
+          status: 'error',
           isClosable: true,
           duration: 2000,
         });
@@ -453,146 +473,175 @@ function Body() {
   };
 
   const subscribeToEvents = () => {
-    console.log("ACTION", "subscribeToEvents");
+    console.log('ACTION', 'subscribeToEvents');
 
-    if (connector) {
-      connector.on("session_request", (error, payload) => {
+    if (wcV2wallet) {
+      wcV2wallet.on('session_request', async (eventWC: any) => {
         if (loading) {
           setLoading(false);
         }
-        console.log("EVENT", "session_request");
+        console.log('EVENT', 'session_request');
+        const { topic, params, id } = eventWC;
+        const { request } = params;
+        const requestParamsMessage = request.params[0];
 
-        if (error) {
-          throw error;
-        }
+        approveSession();
+        // convert `requestParamsMessage` by using a method like hexToUtf8
+        // const message = hexToUtf8(requestParamsMessage);
 
-        console.log("SESSION_REQUEST", payload.params);
-        setPeerMeta(payload.params[0].peerMeta);
-      });
+        // sign the message
+        // const signedMessage = await wcV2wallet.signMessage(message);
 
-      connector.on("session_update", (error) => {
-        console.log("EVENT", "session_update");
-        setLoading(false);
+        // const response = { id, result: signedMessage, jsonrpc: '2.0' };
 
-        if (error) {
-          throw error;
-        }
-      });
-
-      connector.on("call_request", async (error, payload) => {
-        console.log({ payload });
-
-        if (payload.method === "eth_sendTransaction") {
-          setSendTxnData((data) => {
-            const newTxn = {
-              id: payload.id,
-              from: payload.params[0].from,
-              to: payload.params[0].to,
-              data: payload.params[0].data,
-              value: payload.params[0].value
-                ? parseInt(payload.params[0].value, 16).toString()
-                : "0",
-            };
-
-            if (data.some((d) => d.id === newTxn.id)) {
-              return data;
-            } else {
-              return [newTxn, ...data];
-            }
-          });
-
-          if (tenderlyForkId.length > 0) {
-            const { data: res } = await axios.post(
-              "https://rpc.tenderly.co/fork/" + tenderlyForkId,
-              {
-                jsonrpc: "2.0",
-                id: payload.id,
-                method: payload.method,
-                params: payload.params,
-              }
-            );
-            console.log({ res });
-
-            // Approve Call Request
-            connector.approveRequest({
-              id: res.id,
-              result: res.result,
-            });
-
-            toast({
-              title: "Txn successful",
-              description: `Hash: ${res.result}`,
-              status: "success",
-              position: "bottom-right",
-              duration: null,
-              isClosable: true,
-            });
-          }
-        }
+        await wcV2wallet.respondSessionRequest({
+          topic,
+          response: {
+            id: 1,
+            jsonrpc: '',
+            result: '',
+          },
+        });
 
         // if (error) {
         //   throw error;
         // }
 
-        // await getAppConfig().rpcEngine.router(payload, this.state, this.bindedSetState);
+        // console.log('SESSION_REQUEST', payload.params);
+        // setPeerMeta(payload.params[0].peerMeta);
       });
 
-      connector.on("connect", (error, payload) => {
-        console.log("EVENT", "connect");
+      // wcV2wallet.on('session_update', (error: any) => {
+      //   console.log('EVENT', 'session_update');
+      //   setLoading(false);
 
-        if (error) {
-          throw error;
-        }
+      //   if (error) {
+      //     throw error;
+      //   }
+      // });
 
-        // this.setState({ connected: true });
-      });
+      // wcV2wallet.on('call_request', async (error: any, payload: any) => {
+      //   console.log({ payload });
 
-      connector.on("disconnect", (error, payload) => {
-        console.log("EVENT", "disconnect");
+      //   if (payload.method === 'eth_sendTransaction') {
+      //     setSendTxnData((data) => {
+      //       const newTxn = {
+      //         id: payload.id,
+      //         from: payload.params[0].from,
+      //         to: payload.params[0].to,
+      //         data: payload.params[0].data,
+      //         value: payload.params[0].value ? parseInt(payload.params[0].value, 16).toString() : '0',
+      //       };
 
-        if (error) {
-          throw error;
-        }
+      //       if (data.some((d) => d.id === newTxn.id)) {
+      //         return data;
+      //       } else {
+      //         return [newTxn, ...data];
+      //       }
+      //     });
 
-        reset();
-      });
+      //     if (tenderlyForkId.length > 0) {
+      //       const { data: res } = await axios.post('https://rpc.tenderly.co/fork/' + tenderlyForkId, {
+      //         jsonrpc: '2.0',
+      //         id: payload.id,
+      //         method: payload.method,
+      //         params: payload.params,
+      //       });
+      //       console.log({ res });
+
+      //       // Approve Call Request
+      //       wcV2wallet.approveRequest({
+      //         id: res.id,
+      //         result: res.result,
+      //       });
+
+      //       toast({
+      //         title: 'Txn successful',
+      //         description: `Hash: ${res.result}`,
+      //         status: 'success',
+      //         position: 'bottom-right',
+      //         duration: null,
+      //         isClosable: true,
+      //       });
+      //     }
+      //   }
+
+      //   // if (error) {
+      //   //   throw error;
+      //   // }
+
+      //   // await getAppConfig().rpcEngine.router(payload, this.state, this.bindedSetState);
+      // });
+
+      // wcV2wallet.on('connect', (error: any, payload: any) => {
+      //   console.log('EVENT', 'connect');
+
+      //   if (error) {
+      //     throw error;
+      //   }
+
+      //   // this.setState({ connected: true });
+      // });
+
+      // wcV2wallet.on('disconnect', (error: any, payload: any) => {
+      //   console.log('EVENT', 'disconnect');
+
+      //   if (error) {
+      //     throw error;
+      //   }
+
+      //   reset();
+      // });
     }
   };
 
   const approveSession = () => {
-    console.log("ACTION", "approveSession");
-    if (connector) {
+    console.log('ACTION', 'approveSession');
+    if (wcV2wallet) {
       let chainId = networkId;
       if (!chainId) {
         chainId = 1; // default to ETH Mainnet if no network selected
       }
-      connector.approveSession({ chainId, accounts: [address] });
+      wcV2wallet.approveSession({
+        id: 1,
+        namespaces: {
+          1: {
+            accounts: [address],
+            methods: ['eth_sendTransaction', 'eth_sign', 'eth_signTypedData', 'eth_signT'],
+            events: ['session_request'],
+          },
+        },
+      });
       setIsConnected(true);
     }
   };
 
-  const rejectSession = () => {
-    console.log("ACTION", "rejectSession");
-    if (connector) {
-      connector.rejectSession();
-      setPeerMeta(undefined);
+  const rejectSession = (proposal: any) => {
+    console.log('ACTION', 'rejectSession');
+    if (wcV2wallet) {
+      wcV2wallet.rejectSession({
+        id: proposal.id,
+        reason: { code: 2, message: 'USER_REJECTED_METHODS' },
+      });
+      // setPeerMeta(undefined);
     }
   };
 
-  const updateSession = ({
-    newChainId,
-    newAddress,
-  }: {
-    newChainId?: number;
-    newAddress?: string;
-  }) => {
+  const updateSession = ({ newChainId, newAddress }: { newChainId?: number; newAddress?: string }) => {
     let _chainId = newChainId || networkId;
     let _address = newAddress || address;
 
-    if (connector && connector.connected) {
-      connector.updateSession({
-        chainId: _chainId,
-        accounts: [_address],
+    if (wcV2wallet) {
+      wcV2wallet.updateSession({
+        topic: 'session_update',
+        namespaces: {
+          1: {
+            accounts: ['1' + _address],
+            // chains: [_chainId.toString()],
+            methods: ['eth_sendTransaction', 'eth_sign', 'eth_signTypedData', 'eth_signT'],
+            events: ['session_request'],
+          },
+        },
       });
     } else {
       setLoading(false);
@@ -633,72 +682,71 @@ function Body() {
   };
 
   const killSession = () => {
-    console.log("ACTION", "killSession");
+    console.log('ACTION', 'killSession');
 
-    if (connector) {
-      connector.killSession();
+    if (wcV2wallet) {
+      wcV2wallet.disconnectSession({
+        topic: 'session_kill',
+        reason: {
+          code: 1,
+          message: 'USER_DISCONNECTED',
+        },
+      });
+      /**
+       * code: number;
+    message: string;
+    data?: string;
+       */
 
-      setPeerMeta(undefined);
+      // setPeerMeta(undefined);
       setIsConnected(false);
     }
   };
 
   const reset = () => {
-    setPeerMeta(undefined);
+    // setPeerMeta(undefined);
     setIsConnected(false);
-    localStorage.removeItem("walletconnect");
+    localStorage.removeItem('walletconnect');
   };
 
   return (
-    <Container my="16" minW={["0", "0", "2xl", "2xl"]}>
+    <Container my='16' minW={['0', '0', '2xl', '2xl']}>
       <Flex>
-        <Spacer flex="1" />
-        <Popover
-          placement="bottom-start"
-          isOpen={isOpen}
-          onOpen={onOpen}
-          onClose={onClose}
-        >
+        <Spacer flex='1' />
+        <Popover placement='bottom-start' isOpen={isOpen} onOpen={onOpen} onClose={onClose}>
           <PopoverTrigger>
             <Box>
               <Button>
                 <SettingsIcon
-                  transition="900ms rotate ease-in-out"
-                  transform={isOpen ? "rotate(33deg)" : "rotate(0deg)"}
+                  transition='900ms rotate ease-in-out'
+                  transform={isOpen ? 'rotate(33deg)' : 'rotate(0deg)'}
                 />
               </Button>
             </Box>
           </PopoverTrigger>
-          <PopoverContent
-            border={0}
-            boxShadow="xl"
-            rounded="xl"
-            overflowY="auto"
-          >
-            <Box px="1rem" py="1rem">
+          <PopoverContent border={0} boxShadow='xl' rounded='xl' overflowY='auto'>
+            <Box px='1rem' py='1rem'>
               <HStack>
                 <Text>(optional) Tenderly Fork Id:</Text>
                 <Tooltip
                   label={
                     <>
                       <Text>Simulate sending transactions on forked node.</Text>
-                      <chakra.hr bg="gray.400" />
-                      <ListItem>
-                        Create a fork on Tenderly and grab it's id from the URL.
-                      </ListItem>
+                      <chakra.hr bg='gray.400' />
+                      <ListItem>Create a fork on Tenderly and grab it's id from the URL.</ListItem>
                     </>
                   }
                   hasArrow
-                  placement="top"
+                  placement='top'
                 >
                   <InfoIcon />
                 </Tooltip>
               </HStack>
               <Input
-                mt="0.5rem"
-                aria-label="fork-rpc"
-                placeholder="xxxx-xxxx-xxxx-xxxx"
-                autoComplete="off"
+                mt='0.5rem'
+                aria-label='fork-rpc'
+                placeholder='xxxx-xxxx-xxxx-xxxx'
+                autoComplete='off'
                 value={tenderlyForkId}
                 onChange={(e) => {
                   setTenderlyForkId(e.target.value);
@@ -712,8 +760,8 @@ function Body() {
         <FormLabel>Enter Address or ENS to Impersonate</FormLabel>
         <InputGroup>
           <Input
-            placeholder="vitalik.eth"
-            autoComplete="off"
+            placeholder='vitalik.eth'
+            autoComplete='off'
             value={showAddress}
             onChange={(e) => {
               const _showAddress = e.target.value;
@@ -724,28 +772,27 @@ function Body() {
             bg={bgColor[colorMode]}
             isInvalid={!isAddressValid}
           />
-          {((selectedTabIndex === 0 && isConnected) ||
-            (selectedTabIndex === 1 && appUrl && !isIFrameLoading)) && (
-            <InputRightElement width="4.5rem" mr="1rem">
-              <Button h="1.75rem" size="sm" onClick={updateAddress}>
+          {((selectedTabIndex === 0 && isConnected) || (selectedTabIndex === 1 && appUrl && !isIFrameLoading)) && (
+            <InputRightElement width='4.5rem' mr='1rem'>
+              <Button h='1.75rem' size='sm' onClick={updateAddress}>
                 Update
               </Button>
             </InputRightElement>
           )}
         </InputGroup>
       </FormControl>
-      <Box mt={4} cursor="pointer">
+      <Box mt={4} cursor='pointer'>
         <RSelect
           options={[
             {
-              label: "",
+              label: '',
               options: primaryNetworkOptions.map((network) => ({
                 label: network.name,
                 value: network.chainId,
               })),
             },
             {
-              label: "",
+              label: '',
               options: secondaryNetworkOptions.map((network) => ({
                 label: network.name,
                 value: network.chainId,
@@ -754,36 +801,29 @@ function Body() {
           ]}
           value={selectedNetworkOption}
           onChange={setSelectedNetworkOption}
-          placeholder="Select chain..."
-          size="md"
-          tagVariant="solid"
+          placeholder='Select chain...'
+          size='md'
+          tagVariant='solid'
           chakraStyles={{
             groupHeading: (provided, state) => ({
               ...provided,
-              h: "1px",
-              borderTop: "1px solid white",
+              h: '1px',
+              borderTop: '1px solid white',
             }),
           }}
           closeMenuOnSelect
           useBasicStyles
         />
       </Box>
-      <Center flexDir="column">
-        <HStack
-          mt="1rem"
-          minH="3rem"
-          px="1.5rem"
-          spacing={"8"}
-          background="gray.700"
-          borderRadius="xl"
-        >
+      <Center flexDir='column'>
+        <HStack mt='1rem' minH='3rem' px='1.5rem' spacing={'8'} background='gray.700' borderRadius='xl'>
           {tabs.map((t, i) => (
             <Tab
               key={i}
               tabIndex={i}
               selectedTabIndex={selectedTabIndex}
               setSelectedTabIndex={setSelectedTabIndex}
-              isNew={i === 2}
+              isNew={i === 0}
             >
               {t}
             </Tab>
@@ -797,30 +837,27 @@ function Body() {
               <>
                 <FormControl my={4}>
                   <HStack>
-                    <FormLabel>WalletConnect URI</FormLabel>
+                    <FormLabel>WalletConnect V2 URI</FormLabel>
                     <Tooltip
                       label={
                         <>
                           <Text>Visit any dApp and select WalletConnect.</Text>
-                          <Text>
-                            Click "Copy to Clipboard" beneath the QR code, and
-                            paste it here.
-                          </Text>
+                          <Text>Click "Copy to Clipboard" beneath the QR code, and paste it here.</Text>
                         </>
                       }
                       hasArrow
-                      placement="top"
+                      placement='top'
                     >
-                      <Box pb="0.8rem">
+                      <Box pb='0.8rem'>
                         <InfoIcon />
                       </Box>
                     </Tooltip>
                   </HStack>
                   <Box>
                     <Input
-                      placeholder="wc:xyz123"
-                      aria-label="uri"
-                      autoComplete="off"
+                      placeholder='wc:xyz123'
+                      aria-label='uri'
+                      autoComplete='off'
                       value={uri}
                       onChange={(e) => setUri(e.target.value)}
                       bg={bgColor[colorMode]}
@@ -854,16 +891,16 @@ function Body() {
                     </VStack>
                   </Center>
                 )}
-                {peerMeta && (
+                {/* {peerMeta && (
                   <>
-                    <Box mt={4} fontSize={24} fontWeight="semibold">
-                      {isConnected ? "✅ Connected To:" : "⚠ Allow to Connect"}
+                    <Box mt={4} fontSize={24} fontWeight='semibold'>
+                      {isConnected ? '✅ Connected To:' : '⚠ Allow to Connect'}
                     </Box>
                     <VStack>
                       <Avatar src={peerMeta.icons[0]} alt={peerMeta.name} />
-                      <Text fontWeight="bold">{peerMeta.name}</Text>
-                      <Text fontSize="sm">{peerMeta.description}</Text>
-                      <Link href={peerMeta.url} textDecor="underline">
+                      <Text fontWeight='bold'>{peerMeta.name}</Text>
+                      <Text fontSize='sm'>{peerMeta.description}</Text>
+                      <Link href={peerMeta.url} textDecor='underline'>
                         {peerMeta.url}
                       </Link>
                       {!isConnected && (
@@ -881,7 +918,7 @@ function Body() {
                       )}
                     </VStack>
                   </>
-                )}
+                )} */}
               </>
             );
           case 1:
@@ -893,72 +930,53 @@ function Body() {
                     <Tooltip
                       label={
                         <>
-                          <Text>
-                            Paste the URL of dapp you want to connect to
-                          </Text>
-                          <Text>
-                            Note: Some dapps might not support it, so use
-                            WalletConnect in that case
-                          </Text>
+                          <Text>Paste the URL of dapp you want to connect to</Text>
+                          <Text>Note: Some dapps might not support it, so use WalletConnect in that case</Text>
                         </>
                       }
                       hasArrow
-                      placement="top"
+                      placement='top'
                     >
-                      <Box pb="0.8rem">
+                      <Box pb='0.8rem'>
                         <InfoIcon />
                       </Box>
                     </Tooltip>
                     <Spacer />
-                    <Box pb="0.5rem">
-                      <Button size="sm" onClick={openSafeAapps}>
+                    <Box pb='0.5rem'>
+                      <Button size='sm' onClick={openSafeAapps}>
                         Supported dapps
                       </Button>
                     </Box>
-                    <Modal
-                      isOpen={isSafeAppsOpen}
-                      onClose={closeSafeApps}
-                      isCentered
-                    >
-                      <ModalOverlay
-                        bg="none"
-                        backdropFilter="auto"
-                        backdropBlur="3px"
-                      />
+                    <Modal isOpen={isSafeAppsOpen} onClose={closeSafeApps} isCentered>
+                      <ModalOverlay bg='none' backdropFilter='auto' backdropBlur='3px' />
                       <ModalContent
                         minW={{
                           base: 0,
-                          sm: "30rem",
-                          md: "40rem",
-                          lg: "60rem",
+                          sm: '30rem',
+                          md: '40rem',
+                          lg: '60rem',
                         }}
                       >
                         <ModalHeader>Select a dapp</ModalHeader>
                         <ModalCloseButton />
-                        <ModalBody maxH="30rem" overflow={"clip"}>
+                        <ModalBody maxH='30rem' overflow={'clip'}>
                           {(!safeDapps || !safeDapps[networkId]) && (
-                            <Center py="3rem" w="100%">
+                            <Center py='3rem' w='100%'>
                               <Spinner />
                             </Center>
                           )}
-                          <Box pb="2rem" px={{ base: 0, md: "2rem" }}>
+                          <Box pb='2rem' px={{ base: 0, md: '2rem' }}>
                             {safeDapps && safeDapps[networkId] && (
-                              <Center pb="0.5rem">
-                                <InputGroup maxW="30rem">
+                              <Center pb='0.5rem'>
+                                <InputGroup maxW='30rem'>
                                   <Input
-                                    placeholder="search 🔎"
+                                    placeholder='search 🔎'
                                     value={searchSafeDapp}
-                                    onChange={(e) =>
-                                      setSearchSafeDapp(e.target.value)
-                                    }
+                                    onChange={(e) => setSearchSafeDapp(e.target.value)}
                                   />
                                   {searchSafeDapp && (
-                                    <InputRightElement width="3rem">
-                                      <Button
-                                        size="xs"
-                                        variant={"ghost"}
-                                        onClick={() => setSearchSafeDapp("")}
-                                      >
+                                    <InputRightElement width='3rem'>
+                                      <Button size='xs' variant={'ghost'} onClick={() => setSearchSafeDapp('')}>
                                         <CloseIcon />
                                       </Button>
                                     </InputRightElement>
@@ -966,46 +984,28 @@ function Body() {
                                 </InputGroup>
                               </Center>
                             )}
-                            <Box
-                              minH="30rem"
-                              maxH="30rem"
-                              overflow="scroll"
-                              overflowX="auto"
-                              overflowY="auto"
-                            >
-                              <SimpleGrid
-                                pt="1rem"
-                                columns={{ base: 2, md: 3, lg: 4 }}
-                                gap={6}
-                              >
+                            <Box minH='30rem' maxH='30rem' overflow='scroll' overflowX='auto' overflowY='auto'>
+                              <SimpleGrid pt='1rem' columns={{ base: 2, md: 3, lg: 4 }} gap={6}>
                                 {filteredSafeDapps &&
                                   filteredSafeDapps.map((dapp, i) => (
                                     <GridItem
                                       key={i}
-                                      border="2px solid"
-                                      borderColor={"gray.500"}
+                                      border='2px solid'
+                                      borderColor={'gray.500'}
                                       _hover={{
-                                        cursor: "pointer",
-                                        bgColor: "gray.600",
+                                        cursor: 'pointer',
+                                        bgColor: 'gray.600',
                                       }}
-                                      rounded="lg"
+                                      rounded='lg'
                                       onClick={() => {
                                         initIFrame(dapp.url);
                                         setInputAppUrl(dapp.url);
                                         closeSafeApps();
                                       }}
                                     >
-                                      <Center
-                                        flexDir={"column"}
-                                        h="100%"
-                                        p="1rem"
-                                      >
-                                        <Image
-                                          w="2rem"
-                                          src={dapp.iconUrl}
-                                          borderRadius="full"
-                                        />
-                                        <Text mt="0.5rem" textAlign={"center"}>
+                                      <Center flexDir={'column'} h='100%' p='1rem'>
+                                        <Image w='2rem' src={dapp.iconUrl} borderRadius='full' />
+                                        <Text mt='0.5rem' textAlign={'center'}>
                                           {dapp.name}
                                         </Text>
                                       </Center>
@@ -1019,45 +1019,42 @@ function Body() {
                     </Modal>
                   </HStack>
                   <Input
-                    placeholder="https://app.uniswap.org/"
-                    aria-label="dapp-url"
-                    autoComplete="off"
+                    placeholder='https://app.uniswap.org/'
+                    aria-label='dapp-url'
+                    autoComplete='off'
                     value={inputAppUrl}
                     onChange={(e) => setInputAppUrl(e.target.value)}
                     bg={bgColor[colorMode]}
                   />
                 </FormControl>
                 <Center>
-                  <Button
-                    onClick={() => initIFrame()}
-                    isLoading={isIFrameLoading}
-                  >
+                  <Button onClick={() => initIFrame()} isLoading={isIFrameLoading}>
                     Connect
                   </Button>
                 </Center>
                 <Center
-                  mt="1rem"
-                  ml={{ base: "-385", sm: "-315", md: "-240", lg: "-60" }}
-                  px={{ base: "10rem", lg: 0 }}
-                  w="70rem"
+                  mt='1rem'
+                  ml={{ base: '-385', sm: '-315', md: '-240', lg: '-60' }}
+                  px={{ base: '10rem', lg: 0 }}
+                  w='70rem'
                 >
                   {appUrl && (
                     <Box
-                      as="iframe"
+                      as='iframe'
                       w={{
-                        base: "22rem",
-                        sm: "45rem",
-                        md: "55rem",
-                        lg: "1500rem",
+                        base: '22rem',
+                        sm: '45rem',
+                        md: '55rem',
+                        lg: '1500rem',
                       }}
-                      h={{ base: "33rem", md: "35rem", lg: "38rem" }}
-                      title="app"
+                      h={{ base: '33rem', md: '35rem', lg: '38rem' }}
+                      title='app'
                       src={appUrl}
                       key={iframeKey}
-                      borderWidth="1px"
-                      borderStyle={"solid"}
-                      borderColor="white"
-                      bg="white"
+                      borderWidth='1px'
+                      borderStyle={'solid'}
+                      borderColor='white'
+                      bg='white'
                       ref={iframeRef}
                       onLoad={() => setIsIFrameLoading(false)}
                     />
@@ -1067,80 +1064,75 @@ function Body() {
             );
           case 2:
             return (
-              <Center flexDir={"column"} mt="3">
-                <Box w="full" fontWeight={"semibold"} fontSize={"xl"}>
+              <Center flexDir={'column'} mt='3'>
+                <Box w='full' fontWeight={'semibold'} fontSize={'xl'}>
                   <Text>
-                    ⭐ Download the browser extension from:{" "}
+                    ⭐ Download the browser extension from:{' '}
                     <chakra.a
-                      color="blue.200"
-                      href="https://chrome.google.com/webstore/detail/impersonator/hgihfkmoibhccfdohjdbklmmcknjjmgl"
-                      target={"_blank"}
-                      rel="noopener noreferrer"
+                      color='blue.200'
+                      href='https://chrome.google.com/webstore/detail/impersonator/hgihfkmoibhccfdohjdbklmmcknjjmgl'
+                      target={'_blank'}
+                      rel='noopener noreferrer'
                     >
                       Chrome Web Store
                     </chakra.a>
                   </Text>
                 </Box>
-                <HStack mt="2" w="full" fontSize={"lg"}>
+                <HStack mt='2' w='full' fontSize={'lg'}>
                   <Text>Read more:</Text>
                   <Link
-                    color="cyan.200"
-                    fontWeight={"semibold"}
-                    href="https://twitter.com/apoorvlathey/status/1577624123177508864"
+                    color='cyan.200'
+                    fontWeight={'semibold'}
+                    href='https://twitter.com/apoorvlathey/status/1577624123177508864'
                     isExternal
                   >
                     Launch Tweet
                   </Link>
                 </HStack>
-                <Image mt="2" src="/extension.png" />
+                <Image mt='2' src='/extension.png' />
               </Center>
             );
         }
       })()}
       <Center>
         <Box
-          minW={["0", "0", "2xl", "2xl"]}
-          overflowX={"auto"}
-          mt="2rem"
-          pt="0.5rem"
-          pl="1rem"
-          border={"1px solid"}
-          borderColor={"white.800"}
-          rounded="lg"
+          minW={['0', '0', '2xl', '2xl']}
+          overflowX={'auto'}
+          mt='2rem'
+          pt='0.5rem'
+          pl='1rem'
+          border={'1px solid'}
+          borderColor={'white.800'}
+          rounded='lg'
         >
-          <Flex py="2" pl="2" pr="4">
-            <HStack cursor={"pointer"} onClick={tableOnToggle}>
-              <Text fontSize={"xl"}>
-                {tableIsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
-              </Text>
-              <Heading size={"md"}>eth_sendTransactions</Heading>
+          <Flex py='2' pl='2' pr='4'>
+            <HStack cursor={'pointer'} onClick={tableOnToggle}>
+              <Text fontSize={'xl'}>{tableIsOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}</Text>
+              <Heading size={'md'}>eth_sendTransactions</Heading>
               <Tooltip
                 label={
                   <>
-                    <Text>
-                      "eth_sendTransaction" requests by the dApp are shown here
-                      (latest on top)
-                    </Text>
+                    <Text>"eth_sendTransaction" requests by the dApp are shown here (latest on top)</Text>
                   </>
                 }
                 hasArrow
-                placement="top"
+                placement='top'
               >
-                <Box pb="0.8rem">
+                <Box pb='0.8rem'>
                   <InfoIcon />
                 </Box>
               </Tooltip>
             </HStack>
-            <Flex flex="1" />
+            <Flex flex='1' />
             {sendTxnData.length > 0 && (
               <Button onClick={() => setSendTxnData([])}>
                 <DeleteIcon />
-                <Text pl="0.5rem">Clear</Text>
+                <Text pl='0.5rem'>Clear</Text>
               </Button>
             )}
           </Flex>
           <Collapse in={tableIsOpen} animateOpacity>
-            <Table variant="simple">
+            <Table variant='simple'>
               <Thead>
                 <Tr>
                   <Th>from</Th>
