@@ -61,9 +61,9 @@ import axios from 'axios';
 import networksList from 'evm-rpcs-list';
 import { useSafeInject } from '../../contexts/SafeInjectContext';
 import Tab from './Tab';
-import { Web3Wallet as Web3WalletType } from '@walletconnect/web3wallet/dist/types/client';
 import SignClient from '@walletconnect/sign-client';
-import { SessionTypes } from '@walletconnect/types';
+import { PairingTypes, SessionTypes } from '@walletconnect/types';
+import { IClientMeta } from '@walletconnect/legacy-types';
 
 interface SafeDappInfo {
   id: number;
@@ -157,15 +157,16 @@ function Body() {
   const [showAddress, setShowAddress] = useState(addressFromURL ?? ''); // gets displayed in input. ENS name remains as it is
   const [address, setAddress] = useState(addressFromURL ?? ''); // internal resolved address
   const [isAddressValid, setIsAddressValid] = useState(true);
-  const [uri, setUri] = useState('');
+  const [uri, setUri] = useState<string | undefined>(undefined);
   const [networkId, setNetworkId] = useState(networkIdViaURL);
   const [selectedNetworkOption, setSelectedNetworkOption] = useState<SingleValue<SelectedNetworkOption>>({
     label: networksList[networkIdViaURL].name,
     value: networkIdViaURL,
   });
   // const [connector, setConnector] = useState<WalletConnect>();
-  const [wcV2wallet, setWcV2wallet] = useState<Web3WalletType>();
-  // const [peerMeta, setPeerMeta] = useState<IClientMeta>();
+  const [wcV2wallet, setWcV2wallet] = useState<SignClient>();
+  const [peerMeta, setPeerMeta] = useState<IClientMeta>();
+  const [activeWC2sessions, setActiveWC2sessions] = useState<PairingTypes.Struct[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -192,6 +193,7 @@ function Body() {
   >([]);
 
   useEffect(() => {
+    initWCV2();
     const { session, _showAddress } = getCachedSession();
     if (session) {
       // let _connector = new WalletConnect({ session });
@@ -214,7 +216,9 @@ function Body() {
 
     setProvider(
       new ethers.providers.JsonRpcProvider(
-        process.env.REACT_APP_PROVIDER_URL || `https://mainnet.infura.io/v3/${process.env.REACT_APP_INFURA_KEY}`
+        process.env.NODE_ENV !== 'production'
+          ? process.env.REACT_APP_DEV_PROVIDER_URL
+          : process.env.REACT_APP_PROVIDER_URL || `https://mainnet.infura.io/v3/${process.env.REACT_APP_INFURA_KEY}`
       )
     );
 
@@ -324,6 +328,40 @@ function Body() {
     }
   }, [safeDapps, networkId, searchSafeDapp]);
 
+  const initWCV2 = async () => {
+    const signClient = await SignClient.init({
+      logger: 'debug',
+      projectId: process.env.REACT_APP_WC2_PROJECTID || '71a01028e78b592975e2c692d2061b35',
+      relayUrl: WCUrlV2,
+      metadata: {
+        name: 'React Wallet',
+        description: 'Impersonator for WalletConnect',
+        url: 'https://impersonator.pecorari.fr/',
+        icons: ['https://avatars.githubusercontent.com/u/37784886'],
+      },
+    });
+    setWcV2wallet(signClient);
+    if (signClient) {
+      try {
+        const pairings = signClient.core.pairing.getPairings();
+        console.info('initWalletConnect -> pairings:', pairings);
+        setActiveWC2sessions(pairings);
+        if (pairings.length > 0) {
+          for (const singlePairing of pairings) {
+            if (singlePairing.active) {
+              setIsConnected(true);
+              // setShowAddress(singlePairing);
+              // setAddress(_connector.accounts[0]);
+              setPeerMeta(singlePairing.peerMetadata);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('initWalletConnect -> e:', e);
+      }
+    }
+  };
+
   const resolveAndValidateAddress = async () => {
     let isValid;
     let _address = address;
@@ -377,36 +415,48 @@ function Body() {
     setLoading(true);
     const { isValid } = await resolveAndValidateAddress();
 
-    if (isValid) {
+    if (isValid && uri && wcV2wallet) {
       try {
-        const signClient = await SignClient.init({
-          logger: 'debug',
-          projectId: '71a01028e78b592975e2c692d2061b35', //process.env.NEXT_PUBLIC_PROJECT_ID,
-          relayUrl: WCUrlV2,
-          metadata: {
-            name: 'React Wallet',
-            description: 'Impersonator for WalletConnect',
-            url: 'https://impersonator.dev.copristo.com/',
-            icons: ['https://avatars.githubusercontent.com/u/37784886'],
-          },
+        const connecting = await wcV2wallet.core.pairing.pair({
+          uri: uri,
+          activatePairing: true,
         });
-        // const wcV2wallet = await Web3Wallet.init({
-        //   core, // <- pass the shared `core` instance
-        //   metadata: {
-        //     name: 'Demo app',
-        //     description: 'Demo Client as Wallet/Peer',
-        //     url: 'impersonator.xyz',
-        //     icons: [],
-        //   },
+        const pairings = wcV2wallet.core.pairing.getPairings();
+        console.info('initWalletConnect -> pairings:', pairings);
+        setActiveWC2sessions(pairings);
+        if (pairings.length > 0) {
+          for (const singlePairing of pairings) {
+            if (singlePairing.active) {
+              setIsConnected(true);
+              // setShowAddress(singlePairing);
+              // setAddress(_connector.accounts[0]);
+              // setUri(uri);
+              setPeerMeta(singlePairing.peerMetadata);
+            }
+          }
+        }
+        wcV2wallet.on('session_request', approveSession);
+        // wcV2wallet.on('expirer_deleted', (data) => {
+        //   console.log('expirer_deleted', data);
+        //   setIsConnected(false);
+        //   const pairings = wcV2wallet.core.pairing.getPairings();
+        //   console.info('initWalletConnect -> pairings:', pairings);
+        //   setActiveWC2sessions(pairings);
         // });
-        // let _connector = new WalletConnect({ uri });
-        signClient.on('session_request', approveSession);
+
         // TODOs
-        signClient.on('session_ping', (data) => console.log('ping', data));
-        signClient.on('session_event', (data) => console.log('event', data));
-        signClient.on('session_update', (data) => console.log('update', data));
-        signClient.on('session_delete', (data) => console.log('delete', data));
-        signClient.on('session_proposal', async (proposal) => {
+        // wcV2wallet.on('session_ping', (data) => console.log('ping', data));
+        // wcV2wallet.on('session_event', (data) => console.log('event', data));
+        // wcV2wallet.on('session_update', (data) => console.log('update', data));
+        wcV2wallet.on('session_delete', (data) => {
+          setIsConnected(false);
+          console.log('delete', data);
+          const pairings = wcV2wallet.core.pairing.getPairings();
+          console.info('initWalletConnect -> pairings:', pairings);
+          setActiveWC2sessions(pairings);
+        });
+        wcV2wallet.on('session_proposal', async (proposal) => {
+          console.log('session_proposal', proposal);
           if (proposal) {
             const namespaces: SessionTypes.Namespaces = {};
             const requiredNamespaces = proposal.params.requiredNamespaces;
@@ -422,18 +472,23 @@ function Body() {
                 events: requiredNamespaces[key].events,
               };
             });
-            const { acknowledged } = await signClient.approve({
+            const { acknowledged, topic } = await wcV2wallet.approve({
               id: proposal.id,
               relayProtocol: proposal.params.relays[0].protocol,
               namespaces,
             });
+            console.info('wcV2wallet.on -> topic:', topic);
             await acknowledged();
-            setWcV2wallet(wcV2wallet);
             setLoading(false);
+            setActiveWC2sessions(wcV2wallet.core.pairing.getPairings());
           }
         });
-        await signClient.core.pairing.pair({ uri });
-
+        // if (uri) {
+        // // const anwserPairing = await wcV2wallet.core.pairing.pair({ uri });
+        // console.info('initWalletConnect -> anwserPairing:', anwserPairing);
+        // setActiveWC2sessions([anwserPairing]);
+        // if (anwserPairing.active) setIsConnected(true);
+        // }
         // if (!_connector.connected) {
         //   await _connector.createSession();
         // }
@@ -485,7 +540,7 @@ function Body() {
         const { request } = params;
         const requestParamsMessage = request.params[0];
 
-        approveSession();
+        // approveSession();
         // convert `requestParamsMessage` by using a method like hexToUtf8
         // const message = hexToUtf8(requestParamsMessage);
 
@@ -494,14 +549,14 @@ function Body() {
 
         // const response = { id, result: signedMessage, jsonrpc: '2.0' };
 
-        await wcV2wallet.respondSessionRequest({
-          topic,
-          response: {
-            id: 1,
-            jsonrpc: '',
-            result: '',
-          },
-        });
+        // await wcV2wallet.respondSessionRequest({
+        //   topic,
+        //   response: {
+        //     id: 1,
+        //     jsonrpc: '',
+        //     result: '',
+        //   },
+        // });
 
         // if (error) {
         //   throw error;
@@ -602,47 +657,47 @@ function Body() {
       if (!chainId) {
         chainId = 1; // default to ETH Mainnet if no network selected
       }
-      wcV2wallet.approveSession({
-        id: 1,
-        namespaces: {
-          1: {
-            accounts: [address],
-            methods: ['eth_sendTransaction', 'eth_sign', 'eth_signTypedData', 'eth_signT'],
-            events: ['session_request'],
-          },
-        },
-      });
+      // wcV2wallet.approveSession({
+      //   id: 1,
+      //   namespaces: {
+      //     1: {
+      //       accounts: [address],
+      //       methods: ['eth_sendTransaction', 'eth_sign', 'eth_signTypedData', 'eth_signT'],
+      //       events: ['session_request'],
+      //     },
+      //   },
+      // });
       setIsConnected(true);
     }
   };
 
-  const rejectSession = (proposal: any) => {
-    console.log('ACTION', 'rejectSession');
-    if (wcV2wallet) {
-      wcV2wallet.rejectSession({
-        id: proposal.id,
-        reason: { code: 2, message: 'USER_REJECTED_METHODS' },
-      });
-      // setPeerMeta(undefined);
-    }
-  };
+  // const rejectSession = (proposal: any) => {
+  //   console.log('ACTION', 'rejectSession');
+  //   if (wcV2wallet) {
+  //     wcV2wallet.rejectSession({
+  //       id: proposal.id,
+  //       reason: { code: 2, message: 'USER_REJECTED_METHODS' },
+  //     });
+  //     // setPeerMeta(undefined);
+  //   }
+  // };
 
   const updateSession = ({ newChainId, newAddress }: { newChainId?: number; newAddress?: string }) => {
     let _chainId = newChainId || networkId;
     let _address = newAddress || address;
 
     if (wcV2wallet) {
-      wcV2wallet.updateSession({
-        topic: 'session_update',
-        namespaces: {
-          1: {
-            accounts: ['1' + _address],
-            // chains: [_chainId.toString()],
-            methods: ['eth_sendTransaction', 'eth_sign', 'eth_signTypedData', 'eth_signT'],
-            events: ['session_request'],
-          },
-        },
-      });
+      // wcV2wallet.updateSession({
+      //   topic: 'session_update',
+      //   namespaces: {
+      //     1: {
+      //       accounts: ['1' + _address],
+      //       // chains: [_chainId.toString()],
+      //       methods: ['eth_sendTransaction', 'eth_sign', 'eth_signTypedData', 'eth_signT'],
+      //       events: ['session_request'],
+      //     },
+      //   },
+      // });
     } else {
       setLoading(false);
     }
@@ -681,12 +736,12 @@ function Body() {
     }
   };
 
-  const killSession = () => {
+  const killSession = async (session?: PairingTypes.Struct) => {
     console.log('ACTION', 'killSession');
 
-    if (wcV2wallet) {
-      wcV2wallet.disconnectSession({
-        topic: 'session_kill',
+    if (wcV2wallet && session) {
+      await wcV2wallet.disconnect({
+        topic: session.topic,
         reason: {
           code: 1,
           message: 'USER_DISCONNECTED',
@@ -699,7 +754,7 @@ function Body() {
        */
 
       // setPeerMeta(undefined);
-      setIsConnected(false);
+      setActiveWC2sessions(wcV2wallet.core.pairing.getPairings());
     }
   };
 
@@ -861,15 +916,48 @@ function Body() {
                       value={uri}
                       onChange={(e) => setUri(e.target.value)}
                       bg={bgColor[colorMode]}
-                      isDisabled={isConnected}
                     />
                   </Box>
                 </FormControl>
                 <Center>
-                  <Button onClick={initWalletConnect} isDisabled={isConnected}>
-                    Connect
-                  </Button>
+                  <Button onClick={initWalletConnect}>Connect</Button>
                 </Center>
+                <Box>
+                  {activeWC2sessions.length > 0 && (
+                    <Box mt={4} fontSize={24} fontWeight='semibold'>
+                      {'✅ Connected Sessions :'}
+                    </Box>
+                  )}
+                  {activeWC2sessions.map(
+                    (session) =>
+                      session.peerMetadata && (
+                        <>
+                          <Box mt={4} fontSize={24} fontWeight='semibold'>
+                            {!session.active && '⚠ Allow to Connect'}
+                          </Box>
+                          <VStack>
+                            <Avatar src={session.peerMetadata.icons[0]} alt={session.peerMetadata.name} />
+                            <Text fontWeight='bold'>{session.peerMetadata.name}</Text>
+                            <Text fontSize='sm'>{session.peerMetadata.description}</Text>
+                            <Link href={session.peerMetadata.url} textDecor='underline'>
+                              {session.peerMetadata.url}
+                            </Link>
+                            {!isConnected && (
+                              <Box pt={6}>
+                                <Button mr={10}>Connect ✔</Button>
+                                <Button>Reject ❌</Button>
+                              </Box>
+                            )}
+                            {session.active && (
+                              <Box pt={6}>
+                                <Button onClick={() => killSession(session)}>Disconnect ☠</Button>
+                              </Box>
+                            )}
+                          </VStack>
+                        </>
+                      )
+                  )}
+                </Box>
                 {loading && (
                   <Center>
                     <VStack>
@@ -905,15 +993,13 @@ function Body() {
                       </Link>
                       {!isConnected && (
                         <Box pt={6}>
-                          <Button onClick={approveSession} mr={10}>
-                            Connect ✔
-                          </Button>
-                          <Button onClick={rejectSession}>Reject ❌</Button>
+                          <Button mr={10}>Connect ✔</Button>
+                          <Button>Reject ❌</Button>
                         </Box>
                       )}
                       {isConnected && (
                         <Box pt={6}>
-                          <Button onClick={killSession}>Disconnect ☠</Button>
+                          <Button>Disconnect ☠</Button>
                         </Box>
                       )}
                     </VStack>
