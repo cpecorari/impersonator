@@ -61,9 +61,11 @@ import axios from 'axios';
 import networksList from 'evm-rpcs-list';
 import { useSafeInject } from '../../contexts/SafeInjectContext';
 import Tab from './Tab';
-import SignClient from '@walletconnect/sign-client';
-import { PairingTypes, SessionTypes } from '@walletconnect/types';
+import { Core } from '@walletconnect/core';
+import { SessionTypes, SignClientTypes } from '@walletconnect/types';
 import { IClientMeta } from '@walletconnect/legacy-types';
+import { Web3Wallet } from '@walletconnect/web3wallet';
+import { IWeb3Wallet } from '@walletconnect/web3wallet';
 
 interface SafeDappInfo {
   id: number;
@@ -77,7 +79,11 @@ interface SelectedNetworkOption {
   value: number;
 }
 
-const WCUrlV2 = 'wss://relay.walletconnect.com';
+// const WCUrlV2 = 'wss://relay.walletconnect.com';
+
+const core = new Core({
+  projectId: process.env.REACT_APP_WC2_PROJECTID || '71a01028e78b592975e2c692d2061b35',
+});
 
 const primaryNetworkIds = [
   1, // ETH Mainnet
@@ -164,9 +170,9 @@ function Body() {
     value: networkIdViaURL,
   });
   // const [connector, setConnector] = useState<WalletConnect>();
-  const [wcV2wallet, setWcV2wallet] = useState<SignClient>();
+  const [wcV2wallet, setWcV2wallet] = useState<IWeb3Wallet | undefined>();
   const [peerMeta, setPeerMeta] = useState<IClientMeta>();
-  const [activeWC2sessions, setActiveWC2sessions] = useState<PairingTypes.Struct[]>([]);
+  const [activeWC2sessions, setActiveWC2sessions] = useState<SessionTypes.Struct[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -329,10 +335,9 @@ function Body() {
   }, [safeDapps, networkId, searchSafeDapp]);
 
   const initWCV2 = async () => {
-    const signClient = await SignClient.init({
-      logger: 'debug',
-      projectId: process.env.REACT_APP_WC2_PROJECTID || '71a01028e78b592975e2c692d2061b35',
-      relayUrl: WCUrlV2,
+    const signClient = await Web3Wallet.init({
+      core,
+      // relayUrl: WCUrlV2,
       metadata: {
         name: 'React Wallet',
         description: 'Impersonator for WalletConnect',
@@ -342,17 +347,36 @@ function Body() {
     });
     setWcV2wallet(signClient);
     if (signClient) {
+      signClient.on('session_request', sessionRequest);
+      // TODOs
+      // signClient.on('session_ping', (data) => console.log('ping', data));
+      // signClient.on('session_event', (data) => console.log('event', data));
+      // signClient.on('session_update', (data) => console.log('update', data));
+      signClient.on('session_delete', (data) => {
+        setIsConnected(false);
+        console.log('delete', data);
+        signClient.disconnectSession({
+          topic: data.topic,
+          reason: {
+            code: 0,
+            message: 'Session deleted',
+          },
+        });
+        const sessions = signClient.getActiveSessions(); //core.pairing.getPairings();
+        console.info('initWalletConnect -> pairings:', sessions);
+        setActiveWC2sessions(Object.values(sessions));
+      });
       try {
-        const pairings = signClient.core.pairing.getPairings();
-        console.info('initWalletConnect -> pairings:', pairings);
-        setActiveWC2sessions(pairings);
-        if (pairings.length > 0) {
-          for (const singlePairing of pairings) {
-            if (singlePairing.active) {
+        const sessions = signClient.getActiveSessions(); //core.pairing.getPairings();
+        console.info('initWalletConnect -> pairings:', sessions);
+        setActiveWC2sessions(Object.values(sessions));
+        if (Object.values(sessions).length > 0) {
+          for (const singlePairing of Object.values(sessions)) {
+            if (singlePairing) {
               setIsConnected(true);
-              // setShowAddress(singlePairing);
+              // setShowAddress(singlePairing.self.metadata.name);
               // setAddress(_connector.accounts[0]);
-              setPeerMeta(singlePairing.peerMetadata);
+              setPeerMeta(singlePairing.peer.metadata);
             }
           }
         }
@@ -417,44 +441,12 @@ function Body() {
 
     if (isValid && uri && wcV2wallet) {
       try {
-        const connecting = await wcV2wallet.core.pairing.pair({
+        await wcV2wallet.core.pairing.pair({
           uri: uri,
           activatePairing: true,
         });
-        const pairings = wcV2wallet.core.pairing.getPairings();
-        console.info('initWalletConnect -> pairings:', pairings);
-        setActiveWC2sessions(pairings);
-        if (pairings.length > 0) {
-          for (const singlePairing of pairings) {
-            if (singlePairing.active) {
-              setIsConnected(true);
-              // setShowAddress(singlePairing);
-              // setAddress(_connector.accounts[0]);
-              // setUri(uri);
-              setPeerMeta(singlePairing.peerMetadata);
-            }
-          }
-        }
-        wcV2wallet.on('session_request', approveSession);
-        // wcV2wallet.on('expirer_deleted', (data) => {
-        //   console.log('expirer_deleted', data);
-        //   setIsConnected(false);
-        //   const pairings = wcV2wallet.core.pairing.getPairings();
-        //   console.info('initWalletConnect -> pairings:', pairings);
-        //   setActiveWC2sessions(pairings);
-        // });
+        wcV2wallet.on('session_request', sessionRequest);
 
-        // TODOs
-        // wcV2wallet.on('session_ping', (data) => console.log('ping', data));
-        // wcV2wallet.on('session_event', (data) => console.log('event', data));
-        // wcV2wallet.on('session_update', (data) => console.log('update', data));
-        wcV2wallet.on('session_delete', (data) => {
-          setIsConnected(false);
-          console.log('delete', data);
-          const pairings = wcV2wallet.core.pairing.getPairings();
-          console.info('initWalletConnect -> pairings:', pairings);
-          setActiveWC2sessions(pairings);
-        });
         wcV2wallet.on('session_proposal', async (proposal) => {
           console.log('session_proposal', proposal);
           if (proposal) {
@@ -472,15 +464,18 @@ function Body() {
                 events: requiredNamespaces[key].events,
               };
             });
-            const { acknowledged, topic } = await wcV2wallet.approve({
+            const sessionResp = await wcV2wallet.approveSession({
               id: proposal.id,
               relayProtocol: proposal.params.relays[0].protocol,
               namespaces,
             });
-            console.info('wcV2wallet.on -> topic:', topic);
-            await acknowledged();
             setLoading(false);
-            setActiveWC2sessions(wcV2wallet.core.pairing.getPairings());
+            const pairings = wcV2wallet.core.pairing.getPairings();
+            console.info('wcV2wallet.on -> pairings:', pairings);
+            setActiveWC2sessions((sess) => [...sess, sessionResp]);
+            if (pairings.length > 0) {
+              setIsConnected(true);
+            }
           }
         });
         // if (uri) {
@@ -650,25 +645,85 @@ function Body() {
     }
   };
 
-  const approveSession = () => {
-    console.log('ACTION', 'approveSession');
-    if (wcV2wallet) {
-      let chainId = networkId;
-      if (!chainId) {
-        chainId = 1; // default to ETH Mainnet if no network selected
-      }
-      // wcV2wallet.approveSession({
-      //   id: 1,
-      //   namespaces: {
-      //     1: {
-      //       accounts: [address],
-      //       methods: ['eth_sendTransaction', 'eth_sign', 'eth_signTypedData', 'eth_signT'],
-      //       events: ['session_request'],
-      //     },
-      //   },
-      // });
-      setIsConnected(true);
+  const sessionRequest = async (
+    sessionsR: SignClientTypes.BaseEventArgs<{
+      request: {
+        method: string;
+        params: any;
+      };
+      chainId: string;
+    }>
+  ) => {
+    console.log('ACTION', 'session_request', sessionsR);
+    const payload = sessionsR.params.request;
+    let res: { result: string } | undefined;
+
+    let chainId = networkId;
+    if (!chainId) {
+      chainId = 1; // default to ETH Mainnet if no network selected
     }
+    if (payload.method === 'eth_sendTransaction') {
+      setSendTxnData((data) => {
+        const newTxn = {
+          id: sessionsR.id,
+          from: payload.params[0].from,
+          to: payload.params[0].to,
+          data: payload.params[0].data,
+          value: payload.params[0].value ? parseInt(payload.params[0].value, 16).toString() : '0',
+        };
+
+        if (data.some((d) => d.id === newTxn.id)) {
+          return data;
+        } else {
+          return [newTxn, ...data];
+        }
+      });
+
+      if (tenderlyForkId.length > 0) {
+        const { data } = await axios.post('https://rpc.tenderly.co/fork/' + tenderlyForkId, {
+          jsonrpc: '2.0',
+          id: sessionsR.id,
+          method: payload.method,
+          params: payload.params,
+        });
+        res = data;
+        console.log({ res });
+
+        // Approve Call Request
+        // wcV2wallet.approveRequest({
+        //   id: res.id,
+        //   result: res.result,
+        // });
+        const sendResp = await wcV2wallet?.respondSessionRequest({
+          topic: sessionsR.topic,
+          response: {
+            id: sessionsR.id,
+            jsonrpc: '2.0',
+            result: res?.result,
+          },
+        });
+      }
+    }
+    try {
+      await wcV2wallet?.respondSessionRequest({
+        topic: sessionsR.topic,
+        response: {
+          id: sessionsR.id,
+          jsonrpc: '2.0',
+          error: { code: 0, message: 'Not supported method !' },
+        },
+      });
+    } catch (error) {
+      console.log({ error });
+    }
+    toast({
+      title: 'Txn successful',
+      description: `Hash: ${res?.result}`,
+      status: 'success',
+      position: 'bottom-right',
+      duration: null,
+      isClosable: true,
+    });
   };
 
   // const rejectSession = (proposal: any) => {
@@ -736,25 +791,29 @@ function Body() {
     }
   };
 
-  const killSession = async (session?: PairingTypes.Struct) => {
+  const killSession = async (session?: SessionTypes.Struct) => {
     console.log('ACTION', 'killSession');
 
-    if (wcV2wallet && session) {
-      await wcV2wallet.disconnect({
-        topic: session.topic,
-        reason: {
-          code: 1,
-          message: 'USER_DISCONNECTED',
-        },
-      });
-      /**
+    try {
+      if (wcV2wallet && session) {
+        await wcV2wallet.disconnectSession({
+          topic: session.topic,
+          reason: {
+            code: 1,
+            message: 'USER_DISCONNECTED',
+          },
+        });
+        /**
        * code: number;
-    message: string;
-    data?: string;
-       */
+      message: string;
+      data?: string;
+      */
 
-      // setPeerMeta(undefined);
-      setActiveWC2sessions(wcV2wallet.core.pairing.getPairings());
+        // setPeerMeta(undefined);
+        setActiveWC2sessions(Object.values(wcV2wallet.getActiveSessions()));
+      }
+    } catch (error) {
+      console.error(error);
     }
   };
 
@@ -930,17 +989,17 @@ function Body() {
                   )}
                   {activeWC2sessions.map(
                     (session) =>
-                      session.peerMetadata && (
+                      session && (
                         <>
                           <Box mt={4} fontSize={24} fontWeight='semibold'>
-                            {!session.active && '⚠ Allow to Connect'}
+                            {!session.acknowledged && '⚠ Allow to Connect'}
                           </Box>
                           <VStack>
-                            <Avatar src={session.peerMetadata.icons[0]} alt={session.peerMetadata.name} />
-                            <Text fontWeight='bold'>{session.peerMetadata.name}</Text>
-                            <Text fontSize='sm'>{session.peerMetadata.description}</Text>
-                            <Link href={session.peerMetadata.url} textDecor='underline'>
-                              {session.peerMetadata.url}
+                            <Avatar src={session.peer?.metadata?.icons[0]} alt={session.peer.metadata?.name} />
+                            <Text fontWeight='bold'>{session.peer.metadata?.name}</Text>
+                            <Text fontSize='sm'>{session.peer.metadata?.description}</Text>
+                            <Link href={session.peer.metadata?.url} textDecor='underline'>
+                              {session.peer.metadata?.url}
                             </Link>
                             {!isConnected && (
                               <Box pt={6}>
@@ -948,7 +1007,7 @@ function Body() {
                                 <Button>Reject ❌</Button>
                               </Box>
                             )}
-                            {session.active && (
+                            {session && (
                               <Box pt={6}>
                                 <Button onClick={() => killSession(session)}>Disconnect ☠</Button>
                               </Box>
